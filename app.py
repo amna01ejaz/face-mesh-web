@@ -2,64 +2,61 @@ import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import cv2
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 import av
+import urllib.request
+import os
+import tempfile
 
-# Configure Streamlit Page Layout
 st.set_page_config(page_title="Global Face Mesh App", layout="centered")
-st.title("🤖 Real-Time Face Mesh (Legacy API)")
-st.write("Using the classic mp.solutions API for compatibility with headless cloud environments.")
+st.title("🤖 Real-Time Face Mesh")
+st.write("This app uses the modern MediaPipe Tasks API to map face landmarks via your browser.")
 
-# Initialize legacy solution pieces
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
-mp_face_mesh = mp.solutions.face_mesh
+# Writable directory for downloading the model
+TEMP_DIR = tempfile.gettempdir()
+MODEL_PATH = os.path.join(TEMP_DIR, "face_landmarker.task")
+
+if not os.path.exists(MODEL_PATH):
+    with st.spinner("Downloading face mesh model file... Please wait."):
+        url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+        urllib.request.urlretrieve(url, MODEL_PATH)
 
 class FaceMeshProcessor(VideoProcessorBase):
     def __init__(self):
-        # Setting up the legacy FaceMesh object
-        self.face_mesh = mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+        options = vision.FaceLandmarkerOptions(
+            base_options=base_options,
+            output_face_blendshapes=False,
+            output_facial_transformation_matrixes=False,
+            num_faces=1
         )
+        self.detector = vision.FaceLandmarker.create_from_options(options)
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
         
-        # Convert to RGB for legacy processing
         rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.face_mesh.process(rgb_img)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_img)
         
-        if results.multi_face_landmarks:
-            for face_landmarks in results.multi_face_landmarks:
-                # Draw the tessellation
-                mp_drawing.draw_landmarks(
-                    image=img,
-                    landmark_list=face_landmarks,
-                    connections=mp_face_mesh.FACEMESH_TESSELLATION,
-                    landmark_drawing_spec=None,
-                    connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tessellation_style()
-                )
-                # Draw the main contours
-                mp_drawing.draw_landmarks(
-                    image=img,
-                    landmark_list=face_landmarks,
-                    connections=mp_face_mesh.FACEMESH_CONTOURS,
-                    landmark_drawing_spec=None,
-                    connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
-                )
-                
+        detection_result = self.detector.detect(mp_image)
+        
+        if detection_result.face_landmarks:
+            h, w, _ = img.shape
+            for face_landmarks in detection_result.face_landmarks:
+                for landmark in face_landmarks:
+                    cx, cy = int(landmark.x * w), int(landmark.y * h)
+                    cv2.circle(img, (cx, cy), 1, (0, 255, 0), -1)
+                    
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# STUN server configurations
 RTC_CONFIGURATION = RTCConfiguration(
     {"iceServers": [{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}]}
 )
 
 webrtc_streamer(
-    key="face-mesh-legacy",
+    key="face-mesh",
     video_processor_factory=FaceMeshProcessor,
     rtc_configuration=RTC_CONFIGURATION,
     media_stream_constraints={"video": True, "audio": False},
