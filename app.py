@@ -14,7 +14,8 @@ st.title("🤖 Real-Time Face Mesh (Modern API)")
 st.write("This app uses the modern MediaPipe Tasks API to map face landmarks via your browser.")
 
 # Step 1: Download the Face Landmarker model asset if it doesn't exist
-MODEL_PATH = "face_landmarker.task"
+import tempfile
+MODEL_PATH = os.path.join(tempfile.gettempdir(), "face_landmarker.task")
 if not os.path.exists(MODEL_PATH):
     with st.spinner("Downloading face mesh model file... Please wait."):
         url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
@@ -69,5 +70,5 @@ webrtc_streamer(
     video_processor_factory=FaceMeshProcessor,
     rtc_configuration=RTC_CONFIGURATION,
     media_stream_constraints={"video": True, "audio": False},
-    async_processing=True,
+    async_processing=False,
 )
